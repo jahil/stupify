@@ -1,0 +1,48 @@
+#!/bin/bash -ex
+# Development AppServer user-data script for troyworks.com
+# vsftpd + MySQL Server Configuration
+# Mohsin Mirza <named.conf@gmail.com
+echo BEGIN
+exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+sed -i 's/mnt/data/g' /etc/fstab
+umount /mnt
+mkdir /data
+mount -a
+mkdir /data/lib
+service mysql stop
+sed -i '46s/var\//data\//' /etc/mysql/my.cnf
+sed -i '30s/var\//data\//' /etc/apparmor.d/usr.sbin.mysqld
+sed -i '31s/var\//data\//' /etc/apparmor.d/usr.sbin.mysqld
+/etc/init.d/apparmor restart
+mv /var/lib/mysql /data/lib/
+service mysql start
+/etc/init.d/apache2 stop
+sed -i '4s/var\//data\//' /etc/apache2/sites-available/default
+sed -i '9s/var\//data\//' /etc/apache2/sites-available/default
+mv /var/www/ /data/
+/etc/init.d/apache2 start
+apt-get install -y mkpasswd vsftpd
+echo "local_umask=022" >> /etc/vsftpd.conf
+echo "write_enable=YES" >> /etc/vsftpd.conf
+echo "chroot_local_user=YES" >> /etc/vsftpd.conf
+echo "pasv_enable=YES" >> /etc/vsftpd.conf
+echo "pasv_min_port=65000" >> /etc/vsftpd.conf
+echo "pasv_max_port=65534" >> /etc/vsftpd.conf
+IP=`curl -s http://169.254.169.254/2009-04-04/meta-data/public-ipv4`
+echo "pasv_address=$IP" >> /etc/vsftpd.conf
+service vsftpd restart
+useradd yasir -d /data/yasir -m -s /bin/bash -p `mkpasswd password`
+useradd django -d /data/django -m -p `mkpasswd password`
+cp /etc/sudoers /etc/sudoers.bak
+cp /etc/sudoers /etc/sudoers.tmp
+chmod 0640 /etc/sudoers.tmp
+echo "yasir  ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.tmp
+chmod 0440 /etc/sudoers.tmp
+mv /etc/sudoers.tmp /etc/sudoers
+useradd ftpier -d /data/www -p `mkpasswd passowrd`
+chown -R ftpier.ftpier /data/www
+echo "mohsin" >> /etc/ftpusers
+echo "ubuntu" >> /etc/ftpusers
+echo "yasir" >> /etc/ftpusers
+echo END
+
