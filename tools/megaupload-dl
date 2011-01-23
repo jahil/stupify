@@ -1,0 +1,29 @@
+#!/bin/bash
+# Megaupload Downloader for Linux 0.1
+# Mohsin Mirza <named.conf@gmail.com>
+# ex: megaupload-dl filename 
+#   : cat filename | megaupload-dl
+
+FILE=""
+if [ "$1" == "" ]; then
+   FILE="/dev/stdin"
+else
+   FILE="$1"
+   if [ ! -f $FILE ]; then
+        echo "$FILE : does not exists"
+        exit 1
+   elif [ ! -r $FILE ]; then
+        echo "$FILE: can not read"
+        exit 2
+   fi
+fi
+exec 3<&0
+exec 0<$FILE
+while read lines
+do
+links=$lines
+filenames=`curl -s $lines  | grep "File name" | perl -wlne'm/span>(.*)<\/span/i && print $1' | cut -d ">" -f2`
+echo $filenames; curl -L --cookie .megaupload $links -# -C - -o "$filenames"
+done
+exec 0<&3
+
