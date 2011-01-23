@@ -1,8 +1,8 @@
 #!/bin/bash
-# Megaupload Downloader for Linux 0.1
+# Megaupload Premium Downloader for Linux 0.2
 # Mohsin Mirza <named.conf@gmail.com>
-# ex: megaupload-dl filename 
-#   : cat filename | megaupload-dl
+# ex: megaupload-dl filename
+# ex: cat filename | megaupload-dl
 
 FILE=""
 if [ "$1" == "" ]; then
@@ -17,13 +17,24 @@ else
         exit 2
    fi
 fi
+# Variables
+
+USERNAME=YOUR_USERNAME
+PASS=YOUR_PASSWORD
+COOKIEJAR=$HOME/.cookies
+if [ ! -d $COOKIEJAR ]; then
+        mkdir $COOKIEJAR
+fi
+
+## Do not change anything below here ##
+
+wget --save-cookies $COOKIEJAR/.megaupload --post-data "login=1&redir=1&username=$USERNAME&password=$PASS" -O - http://www.megaupload.com/index.php?c=login > /dev/null
 exec 3<&0
 exec 0<$FILE
 while read lines
 do
 links=$lines
 filenames=`curl -s $lines  | grep "File name" | perl -wlne'm/span>(.*)<\/span/i && print $1' | cut -d ">" -f2`
-echo $filenames; curl -L --cookie .megaupload $links -# -C - -o "$filenames"
+echo $filenames; curl -L --cookie $COOKIEJAR/.megaupload $links -# -C - -o "$filenames"
 done
 exec 0<&3
-
