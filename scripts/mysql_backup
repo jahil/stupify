@@ -1,0 +1,112 @@
+#!/bin/bash
+# Database Backup script.
+# Created By:    Mohammed Salih
+#                System Administrator
+#                MBC Group / New Media Department
+#                Date: 21/06/2007
+
+# Database credentials
+DB_USER=root
+DB_PASS="password"
+
+
+# Get list of Databases except the pid file
+#DBS_LIST=$(ls /data/mysql|grep -v "$hostname.pid")
+DBS_LIST=$(ls /data/db|grep -v "$hostname.pid")
+# Log file
+BAKUP_LOG=/var/log/db-backup.log
+# Backup Base directory
+BASE_BAK_FLDR=/data/backup
+# bin-log files location
+BINLOG_FLDR=/data/logs/binlog/
+# Index file of bin-log
+INCR_INDEX=$BINLOG_FLDR/incr-log.index
+# Full backup file rotation threshold.
+RM_FLDR_DAYS="+14"
+# Incremental backup files rotation threshold
+RM_INCR_DAYS="+7"
+# From here, only edit if you know what you are doing.
+index=0
+
+# Check if we can connect to the mysql server; otherwise die
+#if [ ! "$(id -u -n)" = "mysql" ]; then
+#        echo -e "Error:: $0 : Only user 'mysql' can run this script"
+#        exit 100
+#fi
+
+PING=$(mysqladmin ping -u $DB_USER $DB_PASS 2>/dev/null)
+if [ "$PING" != "mysqld is alive" ]; then
+        echo "Error:: Unable to connected to MySQL Server, exiting !!"
+        exit 101
+fi
+
+
+case "$1" in
+        full)
+                # Full backup.
+                # Flush logs prior to the backup. any changes recorded in
+                # the bin-log after this will backed up in next incremental/full backup.
+                mysql -u $DB_USER $DB_PASS -e "FLUSH LOGS"
+                # Loop through the DB list and create table level backup,
+                # applying appropriate option for MyISAM and InnoDB tables.
+                for DB in $DBS_LIST; do
+                        DB_BKP_FLDR=$BASE_BAK_FLDR/full/$(date +%d-%m-%Y)/$DB
+                        [ ! -d $DB_BKP_FLDR ]  && mkdir -p $DB_BKP_FLDR
+                        # Get the schema of database with the stored procedures.
+                        # This will be the first file in the database backup folder
+                        mysqldump -u $DB_USER $DB_PASS -R -d --single-transaction $DB | \
+                                gzip -c > $DB_BKP_FLDR/000-DB_SCHEMA.sql.gz
+                        index=0
+                        #Get the tables and its type. Store it in an array.
+                        table_types=($(mysql -u $DB_USER $DB_PASS -e "show table status from $DB" | \
+                                awk '{ if ($2 == "MyISAM" || $2 == "InnoDB") print $1,$2}'))
+                        table_type_count=${#table_types[@]}
+                        # Loop through the tables and apply the mysqldump option according to the table type
+                        # The table specific SQL files will not contain any create info for the table schema.
+                        # It is  available in the curresponding SCHEMA file
+                        while [ "$index" -lt "$table_type_count" ]; do
+                                START=$(date +%s)
+                                TYPE=${table_types[$index + 1]}
+                                table=${table_types[$index]}
+                                echo -en "$(date) : backup $DB : $table : $TYPE "
+                                if [ "$TYPE" = "MyISAM" ]; then
+                                        DUMP_OPT="-u $DB_USER $DB_PASS $DB --no-create-info --tables "
+                                else
+                                        DUMP_OPT="-u $DB_USER $DB_PASS $DB --no-create-info --single-transaction --tables"
+                                fi
+                                mysqldump  $DUMP_OPT $table |gzip -c > $DB_BKP_FLDR/$table.sql.gz
+                                index=$(($index + 2))
+                                echo -e " - Total time : $(($(date +%s) - $START))\n"
+                        done
+                done
+                # Rotating old backup. according to the 'RM_FLDR_DAYS'
+                if [ ! -z "$RM_FLDR_DAYS" ]; then
+                        echo -en "$(date) : removing folder : "
+                        find $BASE_BAK_FLDR/full/  -maxdepth 1 -mtime $RM_FLDR_DAYS -type d -exec rm -rf {} \;
+                        echo
+                fi
+                ;;
+        incr)
+                # Incremental Backup
+                # Flush log and backup the last bin-log file prior to the 'flush logs' command.
+                if [ ! -z "$RM_INCR_DAYS" ]; then
+                        LST_FILE=$(tail -1 $INCR_INDEX)
+                        mysql -u $DB_USER $DB_PASS -e "FLUSH LOGS"
+                        [ ! -d $BASE_BAK_FLDR/incremental ] && mkdir -p $BASE_BAK_FLDR/incremental
+                        echo -e "$(date) : Incremental backup : $LST_FILE : Started"
+                        # Compress and store the bin-log file in the incremental folder
+                        gzip -c $LST_FILE > $BASE_BAK_FLDR/incremental/$(date +%d-%m-%Y).gz
+                        echo -e "$(date) : Incremental backup : $LST_FILE : Finished"
+                        echo -en "$(date) : removing file : "
+                        find $BASE_BAK_FLDR/incremental/ -maxdepth 1 -mtime $RM_INCR_DAYS -type f \
+                                -exec rm -fv {} \;
+                        echo
+                fi
+                ;;
+        *)
+                # Usage help.
+                echo "Usage:: $0 (full|incr)"
+                echo "full: Full backup"
+                echo "incr: Incremental backup"
+                ;;
+esac
