@@ -177,3 +177,22 @@ def cmd(command):
     with settings(warn_only=True):
         if is_host_up(env.host):
             run(command)
+
+def setemail(account):
+    with settings(hide('everything', 'commands'), warn_only=True):
+        if is_host_up(env.host):
+            client = prompt("Enter client's email address:")
+            run('mysql -u %s -p%s %s -e "UPDATE users SET email = ' %(env.user, dbpasswd, account) + "'%s'" % client + ' WHERE id = 1"')
+            print(green('email id for %s is now: %s' % (account, client)))
+
+def email(account):
+    """get account admin's email id"""
+    with settings(hide('everything', 'commands'), warn_only=True):
+        if is_host_up(env.host):
+            eid = run('mysql -u %s -p%s %s -Bse "select email from users where username=\'admin\'"' %(env.user, dbpasswd, account))
+            print(red(eid))
+
+def push(account):
+    with settings(hide('running', 'user'), warn_only=True):
+        if is_host_up(env.host):
+            run("cd /falkia/%s ; git pull" % account)
